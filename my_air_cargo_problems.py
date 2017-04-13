@@ -48,6 +48,7 @@ class AirCargoProblem(Problem):
 
         # TODO create concrete Action objects based on the domain action schema for: Load, Unload, and Fly
         # concrete actions definition: specific literal action that does not include variables as with the schema
+
         # for example, the action schema 'Load(c, p, a)' can represent the concrete actions 'Load(C1, P1, SFO)'
         # or 'Load(C2, P2, JFK)'.  The actions for the planning problem must be concrete because the problems in
         # forward search and Planning Graphs must use Propositional Logic
@@ -59,6 +60,19 @@ class AirCargoProblem(Problem):
             '''
             loads = []
             # TODO create all load ground actions from the domain Load action
+            # triple for loop to get all combos of cargo, plane and airports
+            for cargo in self.cargos:
+                for plane in self.planes:
+                    for airport in self.airports:
+                        precond_pos = [expr("At({}, {})".format(cargo, airport))
+                        , expr("At({}, {})".format(plane, airport))]
+                        precond_neg = []
+                        effect_add = [expr("At({}, {})".format(cargo, plane))]
+                        effect_rem = [expr("At({}, {})".format(cargo, airport))]
+                        load = Action(expr("Load({}, {}, {})".format(cargo, plane, airport)),
+                            [precond_pos, precond_neg],
+                            [effect_add, effect_rem])
+                        loads.append(load)
             return loads
 
         def unload_actions():
@@ -68,6 +82,20 @@ class AirCargoProblem(Problem):
             '''
             unloads = []
             # TODO create all Unload ground actions from the domain Unload action
+            # possible better way to do this as load and unload are very similar - possibly refactor
+            # using a helper function
+            for cargo in self.cargos:
+                for plane in self.planes:
+                    for airport in self.airports:
+                        precond_pos = [expr("In({}, {})".format(cargo, plane))
+                        , expr("At({}, {})".format(plane, airport))]
+                        precond_neg = []
+                        effect_add = [expr("At({}, {})".format(cargo, airport))]
+                        effect_rem = [expr("In({}, {})".format(cargo, plane))]
+                        unload = Action(expr("Unload({}, {}, {})".format(cargo, plane, airport)),
+                            [precond_pos, precond_neg],
+                            [effect_add, effect_rem])
+                        unloads.append(unload)
             return unloads
 
         def fly_actions():
@@ -80,14 +108,25 @@ class AirCargoProblem(Problem):
                 for to in self.airports:
                     if fr != to:
                         for p in self.planes:
+                            # create the pre-condition for this fly action to happen. expr function
+                            # just makes an instance of an Expression object (in utils)
+                            # note this is the only precondition we actually have to add because
+                            # the other 2 requried (see readme) or p being a plane and fr being
+                            # an airpot are implicit as we are looping through self.airports and
+                            # self.planes
                             precond_pos = [expr("At({}, {})".format(p, fr)),
                                            ]
+                            # no negative pre-conditions
                             precond_neg = []
+                            # the effect given this fly action is taken
                             effect_add = [expr("At({}, {})".format(p, to))]
+                            # remove this condition if fly action taken
                             effect_rem = [expr("At({}, {})".format(p, fr))]
+                            # puts this all together into an Action object (see planning.py)
                             fly = Action(expr("Fly({}, {}, {})".format(p, fr, to)),
                                          [precond_pos, precond_neg],
                                          [effect_add, effect_rem])
+                            # add this to the list of possible fly actions we can do
                             flys.append(fly)
             return flys
 
@@ -101,8 +140,19 @@ class AirCargoProblem(Problem):
             e.g. 'FTTTFF'
         :return: list of Action objects
         """
-        # TODO implement
-        possible_actions = []
+        # TODO implement first decodes the fluent state using LP_utils method decode_state. And then
+        # given the decoded state from our fluent map. Then loop through the property actions_list
+        # and only add actions in that property that are satisfied at this current state. We do
+        # this by getting the current state via the STATE argument. Then we make an instance of 
+        # a knowledge base (PropKB) so that we can leverage that structure to ask and see if 
+        # given this knowledge base if certain conditions for each action to check are met
+        # We create this KB via the sentence method given in the FluentState class and then
+        # loop through each action and call check_precond method on each action's arguments using
+        # the KB instance we just created based on the STATE string
+        current_state = decode_state(state, self.state_map)
+        kb = PropKB(current_state.pos_sentence())
+        possible_actions = [action for action in self.actions_list if action.check_precond(kb, action.args)]
+
         return possible_actions
 
     def result(self, state: str, action: Action):
@@ -115,7 +165,15 @@ class AirCargoProblem(Problem):
         :return: resulting state after action
         """
         # TODO implement
+
         new_state = FluentState([], [])
+        if action not in self.actions(state):
+            raise ValueError("Not a valid action")
+        current_state = decode_state(state, self.state_map)
+        kb = PropKB(current_state.pos_sentence())
+        action.act(kb, action.args)
+        new_state.pos = kb.clauses
+        new_state.neg = [clause for clause in current_state.sentence() if clause not in kb.clauses]
         return encode_state(new_state, self.state_map)
 
     def goal_test(self, state: str) -> bool:
@@ -187,9 +245,32 @@ def air_cargo_p1() -> AirCargoProblem:
 
 def air_cargo_p2() -> AirCargoProblem:
     # TODO implement Problem 2 definition
-    pass
+    cargos = ['C1', 'C2', 'C3']
+    planes = ['P1', 'P2', 'P3']
+    airports = ['SFO', 'JFK', 'ATL']
+    pos = [expr('At(C1, SFO)'), expr('At(C2,JFK)'), expr('At(C3, ATL)')
+        , expr('At(P1, SFO)'), expr('At(P2, JFK)'), expr('At(P3, ATL)')]
+    neg = [expr('At(C1, JFK)'), expr('At(C1, ATL)'), expr('At(C2, ATL)')
+        , expr('At(C2, SFO)'), expr('At(C3, SFO)'), expr('At(C3, JFK)')
+        , expr('At(P1, ATL)'), expr('At(P1, JFK)'), expr('At(P2, ATL)')
+        , expr('At(P2, SFO)'), expr('At(P3, JFK)'), expr('At(P3, SFO)')]
+    goal = [expr('At(C1,JFK)'), expr('At(C2, SFO)'), expr('At(C3, SFO)')]
+    initial = FluentState(pos, neg)
+    return AirCargoProblem(cargos, planes, airports, initial, goal)
 
 
 def air_cargo_p3() -> AirCargoProblem:
     # TODO implement Problem 3 definition
-    pass
+    cargos = ['C1', 'C2', 'C3', 'C4']
+    planes = ['P1', 'P2']
+    airports = ['SFO', 'JFK', 'ATL', 'ORD']
+    pos = [expr('At(C1, SFO)'), expr('At(C2, JFK)'), expr('At(C3, ATL)')
+        , expr('At(C4, ORD)'), expr('At(P1, SFO)'), expr('At(P2, JFK)')]
+    neg = [expr('At(C1, JFK)'), expr('At(C1, ATL)'), expr('At(C1, ORD)')
+        , expr('At(C2, SFO)'), expr('At(C2, ATL)'), expr('At(C2, ORD)')
+        , expr('At(C3, SFO)'), expr('At(C3, JFK)'), expr('At(C3, ORD)')
+        , expr('At(C4, SFO)'), expr('At(C4, JFK)'), expr('At(C4, ATL)')]
+    goal = [expr('At(C1, JFK)'), expr('At(C3, JFK)'), expr('At(C2, SFO)')
+        , expr('At(C4, SFO) ')]
+    initial = FluentState(pos, neg)
+    return AirCargoProblem(cargos, planes, airports, initial, goal)
