@@ -67,7 +67,7 @@ class AirCargoProblem(Problem):
                         precond_pos = [expr("At({}, {})".format(cargo, airport))
                         , expr("At({}, {})".format(plane, airport))]
                         precond_neg = []
-                        effect_add = [expr("At({}, {})".format(cargo, plane))]
+                        effect_add = [expr("In({}, {})".format(cargo, plane))]
                         effect_rem = [expr("At({}, {})".format(cargo, airport))]
                         load = Action(expr("Load({}, {}, {})".format(cargo, plane, airport)),
                             [precond_pos, precond_neg],
@@ -146,13 +146,13 @@ class AirCargoProblem(Problem):
         # this by getting the current state via the STATE argument. Then we make an instance of 
         # a knowledge base (PropKB) so that we can leverage that structure to ask and see if 
         # given this knowledge base if certain conditions for each action to check are met
-        # We create this KB via the sentence method given in the FluentState class and then
+        # We create this KB via the pos_sentence method given in the FluentState class. This allows
+        # us to put only the positive fluents into our KB and then
         # loop through each action and call check_precond method on each action's arguments using
         # the KB instance we just created based on the STATE string
         current_state = decode_state(state, self.state_map)
         kb = PropKB(current_state.pos_sentence())
         possible_actions = [action for action in self.actions_list if action.check_precond(kb, action.args)]
-
         return possible_actions
 
     def result(self, state: str, action: Action):
@@ -167,14 +167,35 @@ class AirCargoProblem(Problem):
         # TODO implement
 
         new_state = FluentState([], [])
-        if action not in self.actions(state):
-            raise ValueError("Not a valid action")
-        current_state = decode_state(state, self.state_map)
-        kb = PropKB(current_state.pos_sentence())
-        action.act(kb, action.args)
-        new_state.pos = kb.clauses
-        new_state.neg = [clause for clause in current_state.sentence() if clause not in kb.clauses]
-        return encode_state(new_state, self.state_map)
+        legal_actions = self.actions(state)
+        # loop through every possible legal_action from STATE. If go through entire loop then 
+        # throw an error as action proposed not a valid one
+        for pos_action in legal_actions:
+            if action.args != pos_action.args or action.name != pos_action.name:
+                continue
+            else:
+                # get the current state
+                current_state = decode_state(state, self.state_map)
+                # print("current: ", current_state.pos)
+                # print("Current - neg: ", current_state.neg)
+                # make a knowledge base object to be used to enact our action onto
+                kb = PropKB(current_state.pos_sentence())
+                # this then enacts our action onto our knowledge base, updating our KB clauses to
+                # reflect the effects this action had on our clauses
+                action.act(kb, action.args)
+                # note: when we do ACT on an action with KB then if a clause in the KB is no longer
+                # true (because of the effect of the action) then this clause is removed from the KB
+                # thus we are guranteed that kb.clauses will be only positive fluents thus can use
+                # it to assign to our positive fluents list for our FluentState
+                new_state.pos = kb.clauses
+                # print("Action: ", action.name, action.args)
+                # print("new state: ", kb.clauses)
+                # then populate the negative fluents by getting all of the fluents in the initial 
+                # state (before the Action) and then only add the fluents that aren't in the 
+                # the new state's positive fluent list
+                new_state.neg = [fluent for fluent in current_state.pos+current_state.neg if fluent not in new_state.pos]
+                return encode_state(new_state, self.state_map)
+        raise ValueError("Invalid Action")
 
     def goal_test(self, state: str) -> bool:
         """ Test the state to see if goal is reached
@@ -214,8 +235,17 @@ class AirCargoProblem(Problem):
         executed.
         '''
         # TODO implement (see Russell-Norvig Ed-3 10.2.3  or Russell-Norvig Ed-2 11.2)
-        count = 0
-        return count
+        # The problem assumed the only 1 action can satisfy one goal. Unlike in the text where it
+        # (in general) is possible to satsify multiple goals with one action. Therefore, all we need
+        # to do is find the number of fluent variables in our goal state (ie like At(C1, JFK)) and 
+        # that is the number of total goals needed to satisfy goal state. Then we take our current
+        # node and take its current state (.state attribute is a string of T' and F's which we can
+        # use to decode it into a fluent state) and all its positive fluents and see how many 
+        # overlap with our goal state and take the difference between total and overlap
+        current_state = decode_state(node.state, self.state_map)
+        total_goals = len(self.goal)
+        satisfied_goals = len(current_state.pos)
+        return total_goals - len(set.intersection(set(self.goal), set(current_state.pos)))
 
 
 def air_cargo_p1() -> AirCargoProblem:
@@ -240,6 +270,8 @@ def air_cargo_p1() -> AirCargoProblem:
     goal = [expr('At(C1, JFK)'),
             expr('At(C2, SFO)'),
             ]
+    # print("initial: ", pos)
+    # print("goal:", goal)
     return AirCargoProblem(cargos, planes, airports, init, goal)
 
 
@@ -253,9 +285,14 @@ def air_cargo_p2() -> AirCargoProblem:
     neg = [expr('At(C1, JFK)'), expr('At(C1, ATL)'), expr('At(C2, ATL)')
         , expr('At(C2, SFO)'), expr('At(C3, SFO)'), expr('At(C3, JFK)')
         , expr('At(P1, ATL)'), expr('At(P1, JFK)'), expr('At(P2, ATL)')
-        , expr('At(P2, SFO)'), expr('At(P3, JFK)'), expr('At(P3, SFO)')]
+        , expr('At(P2, SFO)'), expr('At(P3, JFK)'), expr('At(P3, SFO)')
+        , expr('In(C1, P1)'), expr('In(C1, P2)'), expr('In(C1, P3)')
+        , expr('In(C2, P1)'), expr('In(C2, P2)'), expr('In(C2, P3)')
+        , expr('In(C3, P1)'), expr('In(C3, P2)'), expr('In(C3, P3)')]
     goal = [expr('At(C1,JFK)'), expr('At(C2, SFO)'), expr('At(C3, SFO)')]
     initial = FluentState(pos, neg)
+    # print("initial: ", pos)
+    # print("goal:", goal)
     return AirCargoProblem(cargos, planes, airports, initial, goal)
 
 
@@ -269,8 +306,15 @@ def air_cargo_p3() -> AirCargoProblem:
     neg = [expr('At(C1, JFK)'), expr('At(C1, ATL)'), expr('At(C1, ORD)')
         , expr('At(C2, SFO)'), expr('At(C2, ATL)'), expr('At(C2, ORD)')
         , expr('At(C3, SFO)'), expr('At(C3, JFK)'), expr('At(C3, ORD)')
-        , expr('At(C4, SFO)'), expr('At(C4, JFK)'), expr('At(C4, ATL)')]
+        , expr('At(C4, SFO)'), expr('At(C4, JFK)'), expr('At(C4, ATL)')
+        , expr('In(C1, P1)'), expr('In(C1, P2)'), expr('In(C2, P1)')
+        , expr('In(C2, P2)'), expr('In(C3, P1)'), expr('In(C3, P2)')
+        , expr('In(C4, P1)'), expr('In(C4, P2)')
+        , expr('At(P1, JFK)'), expr('At(P1, ATL)'), expr('At(P1, ORD)')
+        , expr('At(P2, SFO)'), expr('At(P2, ATL)'), expr('At(P2, ORD)')]
     goal = [expr('At(C1, JFK)'), expr('At(C3, JFK)'), expr('At(C2, SFO)')
         , expr('At(C4, SFO) ')]
     initial = FluentState(pos, neg)
+    # print("initial: ", pos)
+    # print("goal:", goal)
     return AirCargoProblem(cargos, planes, airports, initial, goal)
