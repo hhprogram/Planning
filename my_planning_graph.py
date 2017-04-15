@@ -197,6 +197,23 @@ def mutexify(node1: PgNode, node2: PgNode):
     node1.mutex.add(node2)
     node2.mutex.add(node1)
 
+"""
+HLI CODE
+"""
+def is_mutex_relation(node1: PgNode, node2: PgNode):
+    """
+    checks if there is a mutex relation between these 2 nodes
+    :param node1: PgNode (or inherited PgNode_a, PgNode_s types)
+    :param node2: PgNode (or inherited PgNode_a, PgNode_s types)
+    :return:
+        True if mutex relation exists and false if not
+    """
+    if node1 in node2.mutex:
+        return True
+    if node2 in node1.mutex:
+        raise ValueError("Mutex sets don't seem to match!")
+    return False
+
 
 class PlanningGraph():
     '''
@@ -312,6 +329,46 @@ class PlanningGraph():
         #   to see if a proposed PgNode_a has prenodes that are a subset of the previous S level.  Once an
         #   action node is added, it MUST be connected to the S node instances in the appropriate s_level set.
 
+        # this method called by create_graph. So should assume that the previous levels have been
+        # built along. Don't need to worry about mutex relations as we are just building out the
+        # over-arching potential set of actions that can be taken at this level - note some pairs 
+        # of actions in each level cannot be done at same time due to mutex relations but this
+        # method is not concerned with that. Note that since S(i) is the set of all possible
+        # literals. Need to create Action nodes as the SELF.ALL_ACTIONS is a list of Action objects
+        # and note nodes. And also because actions at different levels will have different
+        # attributes like their parents and children etc..
+        if level < 0:
+            raise ValueError("Not a valid level in planning graph")
+        new_actions = set()
+        for action in self.all_actions:
+            # first need to turn actions into action nodes
+            new_action_node = PgNode_a(action)
+            # is this check required? Basically trying to make sure that I don't include actions
+            # that have multiple pre-condition literals and any pairs of these literals have mutex
+            # relations with one another meaning that both preconditions cannot be satisfied at 
+            # this level and thus should not add this action to LEVEL
+            mutux_exists = False
+            # checking subset checks on the values and not the actual objects. Ie if you have two
+            # datetime objects with the same exact date value but are different objects and put them
+            # in different sets then if you do set comparison it will say there's an intersection
+            if new_action_node.prenodes <= self.s_levels[level]:
+                if len(new_action_node.prenodes) > 1:
+                    node = new_action_node.prenodes[0]
+                    for other_node in new_action_node.prenodes[1:]:
+                        if is_mutex_relation(node, other_node):
+                            mutux_exists = True
+                if not mutux_exists:
+                    # adding the S nodes in the same level to the parents to this action node
+                    # because it comes before the action node and all these nodes needed to lead
+                    # to this action node - maybe shouldn't do this as not really applicable as
+                    # action node sometimes require multiple literal nodes in order to happen? so
+                    # the notion of parent node not really applicable (??)
+                    new_action_node.parents = new_action_node.prenodes
+                    new_actions.add(new_action_node)
+        self.a_levels.append(new_actions)
+
+
+
     def add_literal_level(self, level):
         ''' add an S (literal) level to the Planning Graph
 
@@ -329,6 +386,22 @@ class PlanningGraph():
         #   may be "added" to the set without fear of duplication.  However, it is important to then correctly create and connect
         #   all of the new S nodes as children of all the A nodes that could produce them, and likewise add the A nodes to the
         #   parent sets of the S nodes
+        new_literals = set()
+        for action_node in self.a_levels[level-1]:
+            for effect_node in action_node.effnodes:
+                # don't need to make a new literal node object because the literal node object is
+                # created when we first create the corresponding action node and it creates 
+                # literal nodes that it can lead to if this action taken. Thus we just need to 
+                # update the effect_node's parents and add this node to the children of this 
+                # action node
+                action_node.children.add(effect_node)
+                new_literals.add(effect_node)
+        for node in new_literals:
+            for action_node in self.a_levels[level-1]:
+                if node in action_node.effnodes:
+                    node.parents.add(action_node)
+        self.s_levels.append(new_literals)
+
 
     def update_a_mutex(self, nodeset):
         ''' Determine and update sibling mutual exclusion for A-level nodes

@@ -188,12 +188,14 @@ class AirCargoProblem(Problem):
                 # thus we are guranteed that kb.clauses will be only positive fluents thus can use
                 # it to assign to our positive fluents list for our FluentState
                 new_state.pos = kb.clauses
+                # print(new_state.pos)
                 # print("Action: ", action.name, action.args)
-                # print("new state: ", kb.clauses)
+                # print("KB ", kb.clauses)
                 # then populate the negative fluents by getting all of the fluents in the initial 
                 # state (before the Action) and then only add the fluents that aren't in the 
                 # the new state's positive fluent list
                 new_state.neg = [fluent for fluent in current_state.pos+current_state.neg if fluent not in new_state.pos]
+                # print("Negative fluents :", new_state.neg)
                 return encode_state(new_state, self.state_map)
         raise ValueError("Invalid Action")
 
