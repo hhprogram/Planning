@@ -667,30 +667,26 @@ class PlanningGraph():
         # making a blank dictionary to keep track of which goals we have already encountered and
         # when we encounter them record what level it is at
         goal_levels = {}
-        unfound_goals = set(set(self.problem.goal) - set(goal_levels.keys()))
+        unfound_goals = set()
+        # first populate the original problem goals into our 'unfound' set. We create S nodes from
+        # the given goal expressions for easier comparison to the node objects that are in the 
+        # levels iterable
+        for goal in self.problem.goal:
+            node = PgNode_s(goal, True)
+            unfound_goals.add(node)
         # loop through each element in s_levels. Each element is a level of literals. Then check 
         # each level of s_levels
         for index, level in enumerate(self.s_levels):
-            literals = set()
             found_goals = set()
-            # adding the actual expression objects to a set at each level to help efficient chceking
-            # if a goal expression is present at a certain level. Remember the symbols are stored
-            # as the positive version so need to check the node attribute is_pos to determine if
-            # the actual value is a negation of this literal or not
-            for node in level:
-                if not node.is_pos:
-                    literals.add(~node.symbol)
-                else:
-                    literals.add(node.symbol)
-            # only loop through goals we haven't encountered yet to try to be more efficient and
-            # to not override a goal expression's level when found at a later level
+
             for goal in unfound_goals:
-                if goal in literals:
-                    goal_levels[goal] = index
-                    found_goals.add(goal)
+                if goal in level:
+                        goal_levels[goal] = index
+                        found_goals.add(goal)
+
             unfound_goals = unfound_goals - found_goals
             if not unfound_goals:
-                break
+                break                    
 
         for goal in goal_levels:
             level_sum += goal_levels[goal]
