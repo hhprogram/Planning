@@ -214,6 +214,26 @@ def is_mutex_relation(node1: PgNode, node2: PgNode):
         raise ValueError("Mutex sets don't seem to match!")
     return False
 
+def get_expressions(action: Action, cond_or_effect='effect'):
+    """
+    returns a list of expression objects with them properly negated for all effect expressions in 
+    an action object's effect_rem list.
+    Arg:
+        ACTION - the action who we want to return its pre-conditions or effect expressions
+        COND_OR_EFFECT - optional argument to tell method whether to return a list of expressions
+            for ACTION's pre conditions or effects
+    Return:
+        A list of expression objects related to ACTION (with negated expressions properly expressed
+            as negated expression objects)
+    """ 
+    if cond_or_effect == 'effect':
+        return action.effect_add + [~effect for effect in action.effect_rem]
+    elif cond_or_effect == 'cond':
+        return action.precond_pos + [~cond for cond in action.precond_neg]
+
+"""
+HLI CODE ends
+"""
 
 class PlanningGraph():
     '''
@@ -352,19 +372,21 @@ class PlanningGraph():
             # datetime objects with the same exact date value but are different objects and put them
             # in different sets then if you do set comparison it will say there's an intersection
             if new_action_node.prenodes <= self.s_levels[level]:
-                if len(new_action_node.prenodes) > 1:
-                    node = new_action_node.prenodes[0]
-                    for other_node in new_action_node.prenodes[1:]:
-                        if is_mutex_relation(node, other_node):
-                            mutux_exists = True
-                if not mutux_exists:
+                # if len(new_action_node.prenodes) > 1:
+                #     node = new_action_node.prenodes[0]
+                #     for other_node in new_action_node.prenodes[1:]:
+                #         if is_mutex_relation(node, other_node):
+                #             mutux_exists = True
+                # if not mutux_exists:
                     # adding the S nodes in the same level to the parents to this action node
                     # because it comes before the action node and all these nodes needed to lead
                     # to this action node - maybe shouldn't do this as not really applicable as
                     # action node sometimes require multiple literal nodes in order to happen? so
-                    # the notion of parent node not really applicable (??)
-                    new_action_node.parents = new_action_node.prenodes
-                    new_actions.add(new_action_node)
+                    # the notion of parent node not really applicable (??) - > i think it is 
+                    # applicable as all of these literal nodes together present at a previous level
+                    # can be seen as a parent 'node'.
+                new_action_node.parents = new_action_node.prenodes
+                new_actions.add(new_action_node)
         self.a_levels.append(new_actions)
 
 
@@ -460,6 +482,30 @@ class PlanningGraph():
         :return: bool
         '''
         # TODO test for Inconsistent Effects between nodes
+        # this is a list of all expressions for NODE_A1. Will use this to check if any of the 
+        # effect expressions is the negation of one of the effect expressions of node 2. Just 
+        # need one of the effect expressions to be negation of each other than we know there is
+        # an inconsistent_effects_mutex relation. Note: weneed to actually negate the expressions
+        # in effect_rem because these are represented as positive expressions but just live 
+        # in a 'negative expression list' in an Action object thus we know these should actually be
+        # the negative expression value
+        effects1 = get_expressions(node_a1.action) + [child.literal for child in node_a1.children]
+        effects2 = get_expressions(node_a2.action) + [child.literal for child in node_a2.children]
+        for effect in effects1:
+            for effect2 in effects2:
+                # note we can simply do this because udacity has overridden the equals built in
+                # method for expressions see line 412 of utils.py to just be if the expression is
+                # the same and not the actual expression object. Also, see line 365 of utils.py
+                # to see that the built in invert method (denoted in python by ~) has been to 
+                # negate the expression. 
+                # (??) better way to do this? Why is a negated expression's args a tuple?
+                if (effect.op == "~" and effect2.op != "~"):
+                    if effect.args[0] == effect2:
+                        return True
+                if (effect.op != "~" and effect2.op == "~"):
+                    if effect == effect2.args[0]:
+                        return True
+
         return False
 
     def interference_mutex(self, node_a1: PgNode_a, node_a2: PgNode_a) -> bool:
@@ -477,6 +523,33 @@ class PlanningGraph():
         :return: bool
         '''
         # TODO test for Interference between nodes
+        # get the preconditions for action 1 and action 2
+        preconds1 = get_expressions(node_a1.action, 'cond') + [parent.literal for parent in node_a1.parents]
+        preconds2 = get_expressions(node_a2.action, 'cond') + [parent.literal for parent in node_a2.parents]
+        effects1 = get_expressions(node_a1.action) + [child.literal for child in node_a1.children]
+        effects2 = get_expressions(node_a2.action) + [child.literal for child in node_a2.children]
+        # loop through action 1's preconditions and see if any of those equal the negated value 
+        # of any of the effects of action 2 (if so there exists a mutex relation)
+        # (??) better way to do this? Negated a negated expressions just does ~~Have(Cake) instead
+        # of making it positive so this was my way of solving that problem. Because if tried to 
+        # check if a positive literal equalled the negated negative literal it would return false
+        # because the negated negative literal would be ~~ vs. just the positive literal version
+        for precond in preconds1:
+            for effect in effects2:
+                if (precond.op == "~" and effect.op != "~"):
+                    if precond.args[0] == effect:
+                        return True
+                if (precond.op != "~" and effect.op == "~"):
+                    if precond == effect.args[0]:
+                        return True
+        for precond in preconds2:
+            for effect in effects1:
+                if (precond.op == "~" and effect.op != "~"):
+                    if precond.args[0] == effect:
+                        return True
+                if (precond.op != "~" and effect.op == "~"):
+                    if precond == effect.args[0]:
+                        return True
         return False
 
     def competing_needs_mutex(self, node_a1: PgNode_a, node_a2: PgNode_a) -> bool:
@@ -491,6 +564,24 @@ class PlanningGraph():
         '''
 
         # TODO test for Competing Needs between nodes
+        # [print(parent.literal) for parent in node_a1.parents]
+        # preconds1 = get_expressions(node_a1.action, 'cond') + [parent.literal for parent in node_a1.parents]
+        # preconds2 = get_expressions(node_a2.action, 'cond') + [parent.literal for parent in node_a2.parents]
+        preconds1 = node_a1.parents
+        preconds2 = node_a2.parents
+        # [print(parent.literal) for parent in node_a1.parents]
+        # print("actions: ", node_a1.action.name, node_a2.action.name)
+        # print("actual preconditions 1: ", node_a1.action.precond_pos, node_a1.action.precond_neg)
+        # print("actual preconditions 2: ", node_a2.action.precond_pos, node_a2.action.precond_neg)
+        # print("precond1 list:",preconds1)
+        # print("precond2 list:",preconds2)
+        # print(node_a1.is_mutex(node_a2))
+        # basically the same as inconsistent effects mutex relation check but with preconditions
+        for precond in preconds1:
+            for precond2 in preconds2:
+                if precond.is_mutex(precond2):
+                    return True
+
         return False
 
     def update_s_mutex(self, nodeset: set):
@@ -525,8 +616,12 @@ class PlanningGraph():
         :param node_s2: PgNode_s
         :return: bool
         '''
-        # TODO test for negation between nodes
-        return False
+        # TODO test for negation between nodes. OPPOSITE_BOOLEAN just a boolean with value True
+        # when the nodes have differing 'signs'. then return if their symbols are the same and 
+        # their 'signs' differ because that means they are the negation of each other. Allowed to 
+        # do this without going into the expression because of how PgNode is structed
+        opposite_boolean = ((node_s1.is_pos and not node_s2.is_pos) or (not node_s1.is_pos and node_s2.is_pos))
+        return node_s1.symbol == node_s2.symbol and opposite_boolean
 
     def inconsistent_support_mutex(self, node_s1: PgNode_s, node_s2: PgNode_s):
         '''
@@ -544,8 +639,18 @@ class PlanningGraph():
         :param node_s2: PgNode_s
         :return: bool
         '''
-        # TODO test for Inconsistent Support between nodes
-        return False
+        # TODO test for Inconsistent Support between nodes. 
+        # Used an indicator variable to switch to False if find one pair of parent nodes that 
+        # are not mutex. Because since we need every possible pair of parent action nodes to be
+        # mutex then if one pair isn't then it isn't inconsistent support in terms of the parent 
+        # actions (but could still be inconsistent support if the literals are just mutex with 
+            # each other - which is why return the 'or')
+        indicator = True
+        for parent in node_s1.parents:
+            for parent2 in node_s2.parents:
+                if not parent.is_mutex(parent2):
+                    indicator = False
+        return node_s1.is_mutex(node_s2) or indicator
 
     def h_levelsum(self) -> int:
         '''The sum of the level costs of the individual goals (admissible if goals independent)
@@ -555,4 +660,38 @@ class PlanningGraph():
         level_sum = 0
         # TODO implement
         # for each goal in the problem, determine the level cost, then add them together
+        # note we can get the goal for the problem by calling self.problem.goal (which is just
+        # a list of expressions that all need to be satisfied to reach goal state). Note each 
+        # 'level' of s_levels is a set of literal node objects (PgNode_s). we can then retrieve 
+        # the expression objects by calling the symbol attribute on each node object 
+        # making a blank dictionary to keep track of which goals we have already encountered and
+        # when we encounter them record what level it is at
+        goal_levels = {}
+        unfound_goals = set(set(self.problem.goal) - set(goal_levels.keys()))
+        # loop through each element in s_levels. Each element is a level of literals. Then check 
+        # each level of s_levels
+        for index, level in enumerate(self.s_levels):
+            literals = set()
+            found_goals = set()
+            # adding the actual expression objects to a set at each level to help efficient chceking
+            # if a goal expression is present at a certain level. Remember the symbols are stored
+            # as the positive version so need to check the node attribute is_pos to determine if
+            # the actual value is a negation of this literal or not
+            for node in level:
+                if not node.is_pos:
+                    literals.add(~node.symbol)
+                else:
+                    literals.add(node.symbol)
+            # only loop through goals we haven't encountered yet to try to be more efficient and
+            # to not override a goal expression's level when found at a later level
+            for goal in unfound_goals:
+                if goal in literals:
+                    goal_levels[goal] = index
+                    found_goals.add(goal)
+            unfound_goals = unfound_goals - found_goals
+            if not unfound_goals:
+                break
+
+        for goal in goal_levels:
+            level_sum += goal_levels[goal]
         return level_sum
